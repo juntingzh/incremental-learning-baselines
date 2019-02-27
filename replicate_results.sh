@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+cmt# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 #
 #! /bin/bash
 

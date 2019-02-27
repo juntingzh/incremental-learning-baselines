@@ -20,7 +20,7 @@ import tensorflow as tf
 from copy import deepcopy
 from six.moves import cPickle as pickle
 
-from utils.data_utils import construct_split_cifar
+from utils.data_utils import construct_split_cifar, pad_and_random_crop_image
 from utils.utils import get_sample_weights, sample_from_dataset, update_episodic_memory, concatenate_datasets, samples_for_each_class, sample_from_dataset_icarl, compute_fgt, load_task_specific_data
 from utils.vis_utils import plot_acc_multiple_runs, plot_histogram, snapshot_experiment_meta_data, snapshot_experiment_eval, snapshot_task_labels
 from model import Model
@@ -33,6 +33,7 @@ from model import Model
 ## Training Options
 NUM_RUNS = 5           # Number of experiments to average over
 TRAIN_ITERS = 2000      # Number of training iterations per task
+TRAIN_EPOCHS = 100
 BATCH_SIZE = 16
 LEARNING_RATE = 0.1    
 RANDOM_SEED = 1234
@@ -40,7 +41,8 @@ VALID_OPTIMS = ['SGD', 'MOMENTUM', 'ADAM']
 OPTIM = 'SGD'
 OPT_MOMENTUM = 0.9
 OPT_POWER = 0.9
-VALID_ARCHS = ['CNN', 'RESNET-S', 'RESNET-B', 'VGG']
+WEIGHT_DECAY = 1e-4
+VALID_ARCHS = ['CNN', 'RESNET-S', 'RESNET-B', 'VGG', 'RESNET-32']
 ARCH = 'RESNET-S'
 
 ## Model options
@@ -59,7 +61,7 @@ MEASURE_CONVERGENCE_AFTER = 0.9
 EPS_MEM_BATCH_SIZE = 256
 KEEP_EPISODIC_MEMORY_FULL = False
 DEBUG_EPISODIC_MEMORY = False
-K_FOR_CROSS_VAL = 3
+K_FOR_CROSS_VAL = 0
 TIME_MY_METHOD = False
 COUNT_VIOLATONS = False
 MEASURE_PERF_ON_EPS_MEMORY = False
@@ -70,7 +72,7 @@ RESNET18_CIFAR10_CHECKPOINT = './resnet-18-pretrained-cifar10/model.ckpt-19999'
 ## Evaluation options
 
 ## Task split
-NUM_TASKS = 20
+NUM_TASKS = 4
 MULTI_TASK = False
 
 
@@ -124,14 +126,16 @@ def get_arguments():
                                 \n \nSupported values: %s"%(VALID_ARCHS))
     parser.add_argument("--num-runs", type=int, default=NUM_RUNS,
                        help="Total runs/ experiments over which accuracy is averaged.")
-    parser.add_argument("--train-iters", type=int, default=TRAIN_ITERS,
-                       help="Number of training iterations for each task.")
+    parser.add_argument("--epochs", type=int, default=TRAIN_EPOCHS,
+                       help="Number of training epochs for each task.")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
                        help="Mini-batch size for each task.")
     parser.add_argument("--random-seed", type=int, default=RANDOM_SEED,
                        help="Random Seed.")
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE,
                        help="Starting Learning rate for each task.")
+    parser.add_argument("--weight_decay", type=float, default=WEIGHT_DECAY,
+                        help="Weight decay.")
     parser.add_argument("--optim", type=str, default=OPTIM,
                         help="Optimizer for the experiment. \
                                 \n \nSupported values: %s"%(VALID_OPTIMS))
@@ -154,8 +158,8 @@ def get_arguments():
                        help="Directory where the plots and model accuracies will be stored.")
     return parser.parse_args()
 
-def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single_epoch, eval_single_head, do_sampling, is_herding, 
-        mem_per_class, train_iters, batch_size, num_runs, online_cross_val, random_seed):
+def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single_epoch, eval_single_head, do_sampling, is_herding,
+        mem_per_class, train_epochs, batch_size, num_runs, online_cross_val, random_seed):
     """
     Train and evaluate LLL system such that we only see a example once
     Args:
@@ -236,6 +240,7 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
             # If not the first task then restore weights from previous task
             if(task > 0 and model.imp_method != 'PNN'):
                 model.restore(sess)
+            # print('global_step: %s' % tf.train.global_step(sess, tf.train.get_global_step()))
 
             if model.imp_method == 'PNN':
                 pnn_train_phase = np.array(np.zeros(model.num_tasks), dtype=np.bool)
@@ -251,10 +256,11 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
                     # Extract training images and labels for the current task
                     task_train_images, task_train_labels = load_task_specific_data(datasets[0]['train'], task_labels[task])
                 else:
-                    # If not in the cross validation mode then concatenate the train and validation sets
-                    task_tr_images, task_tr_labels = load_task_specific_data(datasets[0]['train'], task_labels[task])
-                    task_val_images, task_val_labels = load_task_specific_data(datasets[0]['validation'], task_labels[task])
-                    task_train_images, task_train_labels = concatenate_datasets(task_tr_images, task_tr_labels, task_val_images, task_val_labels)
+                    # # If not in the cross validation mode then concatenate the train and validation sets
+                    # task_tr_images, task_tr_labels = load_task_specific_data(datasets[0]['train'], task_labels[task])
+                    # task_val_images, task_val_labels = load_task_specific_data(datasets[0]['validation'], task_labels[task])
+                    # task_train_images, task_train_labels = concatenate_datasets(task_tr_images, task_tr_labels, task_val_images, task_val_labels)
+                    task_train_images, task_train_labels = load_task_specific_data(datasets[0]['train'], task_labels[task])
 
             # If multi_task is set then train using all the datasets of all the tasks
             if MULTI_TASK:
@@ -270,6 +276,8 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
 
             print('Received {} images, {} labels at task {}'.format(task_train_images.shape[0], task_train_labels.shape[0], task))
             print('Unique labels in the task: {}'.format(np.unique(np.nonzero(task_train_labels)[1])))
+
+            train_iters = task_train_images.shape[0] * train_epochs // batch_size
 
             # Test for the tasks that we've seen so far
             test_labels += task_labels[task]
@@ -297,7 +305,7 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
             else:
                 num_iters = train_iters
                 # Set the mask only once before starting the training for the task
-                if do_sampling:
+                if eval_single_head or do_sampling:
                     logit_mask[test_labels] = 1.0
                 else:
                     logit_mask[task_labels[task]] = 1.0
@@ -324,7 +332,7 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
                 if train_single_epoch and not cross_validate_mode and not MULTI_TASK:
                     if (iters <= 20) or (iters > 20 and iters % 50 == 0):
                         # Snapshot the current performance across all tasks after each mini-batch
-                        fbatch = test_task_sequence(model, sess, datasets[0]['test'], task_labels, task)
+                        fbatch = test_task_sequence(model, sess, datasets[0]['validation'], task_labels, task, eval_single_head, test_labels=test_labels)
                         ftask.append(fbatch)
                         if model.imp_method == 'PNN':
                             pnn_train_phase[:] = False
@@ -502,7 +510,7 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
                         model.train, model.update_small_omega, model.reg_loss], feed_dict=feed_dict)
 
                 if (iters % 100 == 0):
-                    print('Step {:d} {:.3f}'.format(iters, loss))
+                    print('Step {:d} {:1.5f}'.format(iters, loss))
 
                 if (math.isnan(loss)):
                     print('ERROR: NaNs NaNs NaNs!!!')
@@ -633,7 +641,7 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
                         plot_histogram(flatten_fisher, 100, '/private/home/arslanch/Dropbox/LLL_experiments/Single_Epoch/importance_vis/single_epoch/m_ewc/hist_fisher_task%s.png'%(task))
 
             if train_single_epoch and not cross_validate_mode: 
-                fbatch = test_task_sequence(model, sess, datasets[0]['test'], task_labels, task)
+                fbatch = test_task_sequence(model, sess, datasets[0]['validation'], task_labels, task, eval_single_head, test_labels=test_labels)
                 print('Task: {}, Acc: {}'.format(task, fbatch))
                 ftask.append(fbatch)
                 ftask = np.array(ftask)
@@ -649,10 +657,10 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
                             'labels': episodic_labels,
                             }
                     # Measure perf on episodic memory
-                    ftask = test_task_sequence(model, sess, eps_mem, task_labels, task, classes_per_task=classes_per_task)
+                    ftask = test_task_sequence(model, sess, eps_mem, task_labels, task, eval_single_head, test_labels=test_labels, classes_per_task=classes_per_task)
                 else:
                     # List to store accuracy for all the tasks for the current trained model
-                    ftask = test_task_sequence(model, sess, datasets[0]['test'], task_labels, task)
+                    ftask = test_task_sequence(model, sess, datasets[0]['validation'], task_labels, task, eval_single_head, test_labels=test_labels)
                     print('Task: {}, Acc: {}'.format(task, ftask))
            
             # Store the accuracies computed at task T in a list
@@ -670,7 +678,7 @@ def train_task_sequence(model, sess, datasets, cross_validate_mode, train_single
 
     return runs, task_labels_dataset
 
-def test_task_sequence(model, sess, test_data, test_tasks, task, classes_per_task=0):
+def test_task_sequence(model, sess, test_data, test_tasks, task, eval_single_head, test_labels=None, classes_per_task=0):
     """
     Snapshot the current performance
     """
@@ -705,6 +713,7 @@ def test_task_sequence(model, sess, test_data, test_tasks, task, classes_per_tas
         task_test_images, task_test_labels = load_task_specific_data(test_data, labels)
         if model.imp_method == 'PNN':
             pnn_train_phase = np.array(np.zeros(model.num_tasks), dtype=np.bool)
+            assert eval_single_head is False
             logit_mask[:] = 0
             logit_mask[tt][labels] = 1.0
             feed_dict = {model.x: task_test_images, 
@@ -716,6 +725,7 @@ def test_task_sequence(model, sess, test_data, test_tasks, task, classes_per_tas
             acc = model.accuracy[tt].eval(feed_dict = feed_dict)
 
         elif model.imp_method == 'A-GEM':
+            assert eval_single_head is False
             logit_mask[:] = 0
             logit_mask[tt][labels] = 1.0
             feed_dict = {model.x: task_test_images, 
@@ -723,10 +733,13 @@ def test_task_sequence(model, sess, test_data, test_tasks, task, classes_per_tas
             logit_mask_dict = {m_t: i_t for (m_t, i_t) in zip(model.output_mask, logit_mask)}
             feed_dict.update(logit_mask_dict)
             acc = model.accuracy[tt].eval(feed_dict = feed_dict)
-
         else:
-            logit_mask[:] = 0
-            logit_mask[labels] = 1.0
+            if eval_single_head:
+                logit_mask[:] = 0
+                logit_mask[test_labels] = 1.0
+            else:
+                logit_mask[:] = 0
+                logit_mask[labels] = 1.0
             feed_dict = {model.x: task_test_images, 
                     model.y_: task_test_labels, model.keep_prob: 1.0, model.train_phase: False, model.output_mask: logit_mask}
             acc = model.accuracy.eval(feed_dict = feed_dict)
@@ -764,6 +777,7 @@ def main():
     exper_meta_data = {'ARCH': args.arch,
             'DATASET': 'SPLIT_CIFAR',
             'NUM_RUNS': args.num_runs,
+            'NUM_EPOCHS': args.epochs,
             'EVAL_SINGLE_HEAD': args.eval_single_head, 
             'TRAIN_SINGLE_EPOCH': args.train_single_epoch, 
             'IMP_METHOD': args.imp_method, 
@@ -812,7 +826,13 @@ def main():
         else:
             y_ = tf.placeholder(tf.float32, shape=[None, TOTAL_CLASSES])
 
+        if not args.train_single_epoch:
+            # Define ops for data augmentation
+            x_aug = pad_and_random_crop_image(x, 4, IMG_HEIGHT, IMG_WIDTH)
+            x_aug = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), x_aug)
+
         # Define the optimizer
+        train_iters = args.epochs * TOTAL_CLASSES / NUM_TASKS * 500 // args.batch_size
         if args.optim == 'ADAM':
             opt = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
 
@@ -820,13 +840,20 @@ def main():
             opt = tf.train.GradientDescentOptimizer(learning_rate=args.learning_rate)
 
         elif args.optim == 'MOMENTUM':
-            base_lr = tf.constant(args.learning_rate)
-            learning_rate = tf.scalar_mul(base_lr, tf.pow((1 - train_step / training_iters), OPT_POWER))
-            opt = tf.train.MomentumOptimizer(args.learning_rate, OPT_MOMENTUM)
+
+            boundaries = [int(0.7 * train_iters), int(0.9 * train_iters)]
+            values = [args.learning_rate, 0.1 * args.learning_rate, 0.001 * args.learning_rate]
+            learning_rate = tf.train.piecewise_constant(tf.train.get_or_create_global_step(), boundaries, values)
+            opt = tf.train.MomentumOptimizer(learning_rate, OPT_MOMENTUM)
 
         # Create the Model/ contruct the graph
-        model = Model(x, y_, num_tasks, opt, args.imp_method, args.synap_stgth, args.fisher_update_after, 
+        if args.train_single_epoch:
+            model = Model(x, y_, num_tasks, opt, args.imp_method, args.synap_stgth, args.weight_decay, args.fisher_update_after,
                 args.fisher_ema_decay, network_arch=args.arch)
+        else:
+            model = Model(x_aug, y_, num_tasks, opt, args.imp_method, args.synap_stgth, args.weight_decay,
+                          args.fisher_update_after,
+                          args.fisher_ema_decay, network_arch=args.arch, x_test=x)
 
         # Set up tf session and initialize variables.
         config = tf.ConfigProto()
@@ -834,8 +861,8 @@ def main():
 
         time_start = time.time()
         with tf.Session(config=config, graph=graph) as sess:
-            runs, task_labels_dataset = train_task_sequence(model, sess, datasets, args.cross_validate_mode, args.train_single_epoch, args.eval_single_head, 
-                    args.do_sampling, args.is_herding, args.mem_size, args.train_iters, args.batch_size, args.num_runs, args.online_cross_val, args.random_seed)
+            runs, task_labels_dataset = train_task_sequence(model, sess, datasets, args.cross_validate_mode, args.train_single_epoch, args.eval_single_head,
+                    args.do_sampling, args.is_herding, args.mem_size, args.epochs, args.batch_size, args.num_runs, args.online_cross_val, args.random_seed)
             # Close the session
             sess.close()
         time_end = time.time()
@@ -844,6 +871,14 @@ def main():
     # Store all the results in one dictionary to process later
     exper_acc = dict(mean=runs)
     exper_labels = dict(labels=task_labels_dataset)
+
+    ave_acc = dict()
+    for r in range(args.num_runs):
+        ave_acc[r] = []
+        for i in range(num_tasks):
+            ave_acc[r].append(np.mean(runs[r, i, :i+1]))
+    print(ave_acc)
+
 
     # If cross-validation flag is enabled, store the stuff in a text file
     if args.cross_validate_mode:

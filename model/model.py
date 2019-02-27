@@ -60,7 +60,7 @@ class Model:
     A class defining the model
     """
 
-    def __init__(self, x_train, y_, num_tasks, opt, imp_method, synap_stgth, fisher_update_after, fisher_ema_decay, network_arch='FC-S', 
+    def __init__(self, x_train, y_, num_tasks, opt, imp_method, synap_stgth, weight_decay, fisher_update_after, fisher_ema_decay, network_arch='FC-S',
             is_ATT_DATASET=False, x_test=None, attr=None):
         """
         Instantiate the model
@@ -116,6 +116,7 @@ class Model:
         # A scalar variable for previous syanpse strength
         self.synap_stgth = tf.constant(synap_stgth, shape=[1], dtype=tf.float32)
         self.triplet_loss_scale = 2.1
+        self.weight_decay = weight_decay
 
         # Define different variables
         self.weights_old = []
@@ -203,6 +204,11 @@ class Model:
                 kernels = [7, 3, 3, 3, 3]
                 filters = [64, 64, 128, 256, 512]
                 strides = [2, 0, 2, 2, 2]
+            elif self.network_arch == 'RESNET-32':
+                # ResNet-32
+                kernels = [3, 3, 3, 3]
+                filters = [16, 16, 32, 64]
+                strides = [1, 0, 2, 2]
             if self.imp_method == 'PNN':
                 self.task_logits = []
                 self.task_pruned_logits = []
@@ -224,12 +230,16 @@ class Model:
                     adjusted_entropy = tf.reduce_sum(tf.cast(tf.tile(tf.equal(self.output_mask[i][None,:], 1.0), [tf.shape(y_)[0], 1]), dtype=tf.float32) * y_, axis=1) * cross_entropy
                     self.unweighted_entropy.append(tf.reduce_sum(adjusted_entropy)) # We will average it later on
             else:
-                logits = self.resnet18_conv_feedforward(x, kernels, filters, strides)
+                if self.network_arch == 'RESNET-32':
+                    logits = self.resnet32_conv_feedforward(x, kernels, filters, strides)
+                else:
+                    logits = self.resnet18_conv_feedforward(x, kernels, filters, strides)
 
         # Prune the predictions to only include the classes for which
         # the training data is present
         if (self.imp_method != 'PNN') and (self.imp_method != 'A-GEM' or 'FC-' in self.network_arch):
-            self.pruned_logits = tf.where(tf.tile(tf.equal(self.output_mask[None,:], 1.0), [tf.shape(logits)[0], 1]), logits, NEG_INF*tf.ones_like(logits))
+            self.pruned_logits = tf.where(tf.tile(tf.equal(self.output_mask[None,:], 1.0), [tf.shape(logits)[0], 1]),
+                                          logits, NEG_INF*tf.ones_like(logits))
 
         # Create list of variables for storing different measures
         # Note: This method has to be called before calculating fisher 
@@ -241,8 +251,14 @@ class Model:
             self.mse = 2.0*tf.nn.l2_loss(self.pruned_logits) # tf.nn.l2_loss computes sum(T**2)/ 2
             self.weighted_entropy = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_, 
                 self.pruned_logits, self.sample_weights, reduction=tf.losses.Reduction.NONE))
-            self.unweighted_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, 
-                logits=self.pruned_logits))
+            # self.unweighted_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_,
+            #     logits=self.pruned_logits))
+            mask = tf.equal(self.output_mask, 1.0)
+            new_class_y = tf.boolean_mask(y_, mask, axis=1)
+            new_class_logits = tf.boolean_mask(self.pruned_logits, mask, axis=1)
+            self.unweighted_entropy = tf.reduce_mean(
+                tf.nn.sigmoid_cross_entropy_with_logits(labels=new_class_y, logits=new_class_logits)
+            )
 
         # Create operations for loss and gradient calculation
         self.loss_and_gradients(self.imp_method)
@@ -823,6 +839,55 @@ class Model:
                 logits = _fc(h, self.total_classes, self.trainable_vars, name='fc_1')
             return logits
 
+    def resnet32_conv_feedforward(self, h, kernels, filters, strides):
+        """
+        Forward pass through a ResNet-18 network
+
+        Returns:
+            Logits of a resnet-18 conv network
+        """
+        self.trainable_vars = []
+
+        # Conv1
+        h = _conv(h, kernels[0], filters[0], strides[0], self.trainable_vars, name='conv_1')
+        h = _bn(h, self.trainable_vars, self.train_phase, name='bn_1')
+        h = tf.nn.relu(h)
+
+        # Conv2_x
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_1')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_2')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_3')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_4')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_5')
+
+        # Conv3_x
+        h = _residual_block_first(h, filters[2], strides[2], self.trainable_vars, self.train_phase, name='conv3_1', is_ATT_DATASET=self.is_ATT_DATASET)
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_2')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_3')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_4')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_5')
+
+        # Conv4_x
+        h = _residual_block_first(h, filters[3], strides[3], self.trainable_vars, self.train_phase, name='conv4_1', is_ATT_DATASET=self.is_ATT_DATASET)
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_2')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_3')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_4')
+        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_5')
+
+        # Apply average pooling
+        h = tf.reduce_mean(h, [1, 2])
+
+        # Store the feature mappings
+        self.features = h
+        self.image_feature_dim = h.get_shape().as_list()[-1]
+
+        if self.class_attr is not None:
+            # Return the image features
+            return h
+        else:
+            logits = _fc(h, self.total_classes, self.trainable_vars, name='fc_1', is_cifar=True)
+            return logits
+
 
     def get_attribute_embedding(self, attr):
         """
@@ -867,6 +932,7 @@ class Model:
         if self.is_ATT_DATASET:
             self.unweighted_entropy += tf.add_n([0.0005 * tf.nn.l2_loss(v) for v in self.trainable_vars if 'weights' in v.name or 'kernel' in v.name])
         """
+        l2_reg = tf.add_n([tf.nn.l2_loss(v) for v in self.trainable_vars if 'weights' in v.name or 'kernel' in v.name])
         
         if imp_method == 'PNN':
             # Compute the gradients of regularized loss
@@ -876,7 +942,7 @@ class Model:
                 self.reg_gradients_vars[i] = self.opt.compute_gradients(self.unweighted_entropy[i], var_list=self.trainable_vars[i])
         elif imp_method != 'A-GEM': # For A-GEM we will define the losses and gradients later on
             # Regularized training loss
-            self.reg_loss = tf.squeeze(self.unweighted_entropy + self.synap_stgth * reg)
+            self.reg_loss = tf.squeeze(self.unweighted_entropy + self.synap_stgth * reg + self.weight_decay * l2_reg)
             # Compute the gradients of the vanilla loss
             self.vanilla_gradients_vars = self.opt.compute_gradients(self.unweighted_entropy, 
                     var_list=self.trainable_vars)
@@ -893,19 +959,19 @@ class Model:
         """
         if self.imp_method == 'VAN':
             # Define training operation
-            self.train = self.opt.apply_gradients(self.reg_gradients_vars)
+            self.train = self.opt.apply_gradients(self.reg_gradients_vars, global_step=tf.train.get_global_step())
         elif self.imp_method == 'PNN': 
             # Define training operation
-            self.train = [self.opt.apply_gradients(self.reg_gradients_vars[i]) for i in range(self.num_tasks)]
+            self.train = [self.opt.apply_gradients(self.reg_gradients_vars[i], global_step=tf.train.get_global_step()) for i in range(self.num_tasks)]
         elif self.imp_method == 'FTR_EXT':
             # Define a training operation for the first and subsequent tasks
-            self.train = self.opt.apply_gradients(self.reg_gradients_vars)
+            self.train = self.opt.apply_gradients(self.reg_gradients_vars, global_step=tf.train.get_global_step())
             self.train_classifier = self.opt.apply_gradients(self.reg_gradients_vars[-2:])
         else:
             # Get the value of old weights first
             with tf.control_dependencies([self.weights_old_ops_grouped]):
                 # Define a training operation
-                self.train = self.opt.apply_gradients(self.reg_gradients_vars)
+                self.train = self.opt.apply_gradients(self.reg_gradients_vars, global_step=tf.train.get_global_step())
 
     def init_vars(self):
         """
@@ -999,6 +1065,8 @@ class Model:
         # Set the operation for resetting the optimizer
         self.optimizer_slots = [self.opt.get_slot(var, name) for name in self.opt.get_slot_names()\
                            for var in tf.global_variables() if self.opt.get_slot(var, name) is not None]
+        if self.opt.get_name()=="Adam":
+            self.optimizer_slots.extend(list(self.opt._get_beta_accumulators()))
         self.slot_names = self.opt.get_slot_names()
         self.opt_init_op = tf.variables_initializer(self.optimizer_slots)
 
@@ -1341,4 +1409,6 @@ class Model:
 
         Returns:
         """
-        sess.run(self.restore_weights)
+        reset_global_step = tf.train.get_global_step().assign(0)
+        sess.run([self.restore_weights, reset_global_step])
+
