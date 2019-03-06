@@ -13,6 +13,7 @@ matplotlib.use('agg')
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
 import matplotlib.pyplot as plt
+import pprint
 import matplotlib.figure as figure
 from six.moves import cPickle as pickle
 
@@ -36,7 +37,7 @@ def snapshot_task_labels(logdir, experiment_id, data):
 
     print('Experimental Eval has been snapshotted to %s!'%(snapshot_file))
 
-def snapshot_experiment_meta_data(logdir, experiment_id, exper_meta_data):
+def snapshot_experiment_meta_data(logdir, experiment_id, exper_meta_data, config=None):
     """
     Store the meta-data of the experiment in a file
     """
@@ -45,6 +46,11 @@ def snapshot_experiment_meta_data(logdir, experiment_id, exper_meta_data):
         for key in exper_meta_data:
             print('{}: {}'.format(key, exper_meta_data[key]))
             f.write('{}:{} \n'.format(key, exper_meta_data[key]))
+    if config is not None:
+        with open(meta_file, 'a') as f:
+            dic = vars(config)
+            pp = pprint.PrettyPrinter(indent=1, width=80, depth=None, stream=f)
+            pp.pprint(dic)
 
     print('Experimental meta-data has been snapshotted to %s!'%(meta_file))
 

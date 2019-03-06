@@ -12,7 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from IPython import display
 from utils import clone_variable_list, create_fc_layer, create_conv_layer
-from utils.resnet_utils import _conv, _fc, _bn, _residual_block, _residual_block_first 
+from utils.resnet_utils import _conv, _fc, _bn, _residual_block, _residual_block_first, _residual
 from utils.vgg_utils import vgg_conv_layer, vgg_fc_layer
 
 PARAM_XI_STEP = 1e-3
@@ -116,7 +116,7 @@ class Model:
         # A scalar variable for previous syanpse strength
         self.synap_stgth = tf.constant(synap_stgth, shape=[1], dtype=tf.float32)
         self.triplet_loss_scale = 2.1
-        self.weight_decay = weight_decay
+        self.weight_decay = tf.constant(weight_decay, shape=[1], dtype=tf.float32)
 
         # Define different variables
         self.weights_old = []
@@ -231,7 +231,7 @@ class Model:
                     self.unweighted_entropy.append(tf.reduce_sum(adjusted_entropy)) # We will average it later on
             else:
                 if self.network_arch == 'RESNET-32':
-                    logits = self.resnet32_conv_feedforward(x, kernels, filters, strides)
+                    logits = self.resnet32_conv_feedforward(x, kernels, filters, strides, leakiness=0.1)
                 else:
                     logits = self.resnet18_conv_feedforward(x, kernels, filters, strides)
 
@@ -257,7 +257,7 @@ class Model:
             new_class_y = tf.boolean_mask(y_, mask, axis=1)
             new_class_logits = tf.boolean_mask(self.pruned_logits, mask, axis=1)
             self.unweighted_entropy = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(labels=new_class_y, logits=new_class_logits)
+                tf.nn.softmax_cross_entropy_with_logits_v2(labels=new_class_y, logits=new_class_logits)
             )
 
         # Create operations for loss and gradient calculation
@@ -294,10 +294,9 @@ class Model:
             self.weights_store_ops()
 
             # Summary operations for visualization
-            tf.summary.scalar("unweighted_entropy", self.unweighted_entropy)
-            for v in self.trainable_vars:
-                tf.summary.histogram(v.name.replace(":", "_"), v)
-            self.merged_summary = tf.summary.merge_all()
+            tf.summary.scalar("losses/x_entropy", self.unweighted_entropy)
+            # for v in self.trainable_vars:
+            #     tf.summary.histogram(v.name.replace(":", "_"), v)
 
         # Accuracy measure
         if (self.imp_method == 'PNN') or (self.imp_method == 'A-GEM' and 'FC-' not in self.network_arch):
@@ -312,6 +311,9 @@ class Model:
         else:
             self.correct_predictions = tf.equal(tf.argmax(self.pruned_logits, 1), tf.argmax(y_, 1))
             self.accuracy = tf.reduce_mean(tf.cast(self.correct_predictions, tf.float32))
+            tf.summary.scalar("train_acc", self.accuracy)
+
+        self.merged_summary = tf.summary.merge_all()
    
     def loss_and_train_ops_for_attr_vector(self, x, y_): 
         """
@@ -417,10 +419,10 @@ class Model:
         self.weights_store_ops()
 
         # Summary operations for visualization
-        tf.summary.scalar("triplet_loss", self.unweighted_entropy)
+        tf.summary.scalar("x_entropy_loss", self.unweighted_entropy)
         for v in self.trainable_vars:
             tf.summary.histogram(v.name.replace(":", "_"), v)
-        self.merged_summary = tf.summary.merge_all()
+
 
         # Accuracy measure
         if self.imp_method == 'A-GEM' and 'FC-' not in self.network_arch:
@@ -432,6 +434,9 @@ class Model:
         else:
             self.correct_predictions = tf.equal(tf.argmax(pruned_zst_logits, 1), tf.argmax(y_, 1))
             self.accuracy = tf.reduce_mean(tf.cast(self.correct_predictions, tf.float32))
+            tf.summary.scalar("train_acc", self.accuracy)
+
+        self.merged_summary = tf.summary.merge_all()
   
     def init_fc_column_progNN(self, layer_dims, h, apply_dropout=False):
         """
@@ -839,7 +844,56 @@ class Model:
                 logits = _fc(h, self.total_classes, self.trainable_vars, name='fc_1')
             return logits
 
-    def resnet32_conv_feedforward(self, h, kernels, filters, strides):
+    # def resnet32_conv_feedforward(self, h, kernels, filters, strides, leakiness=0.0):
+    #     """
+    #     Forward pass through a ResNet-18 network
+    #
+    #     Returns:
+    #         Logits of a resnet-18 conv network
+    #     """
+    #     self.trainable_vars = []
+    #
+    #     # Conv1
+    #     h = _conv(h, kernels[0], filters[0], strides[0], self.trainable_vars, name='conv_1')
+    #     h = _bn(h, self.trainable_vars, self.train_phase, name='bn_1')
+    #     h = tf.nn.leaky_relu(h, alpha=leakiness)
+    #
+    #     # Conv2_x
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_1')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_2')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_3')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_4')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_5')
+    #
+    #     # Conv3_x
+    #     h = _residual_block_first(h, filters[2], strides[2], self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_1', is_ATT_DATASET=self.is_ATT_DATASET)
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_2')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_3')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_4')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_5')
+    #
+    #     # Conv4_x
+    #     h = _residual_block_first(h, filters[3], strides[3], self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_1', is_ATT_DATASET=self.is_ATT_DATASET)
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_2')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_3')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_4')
+    #     h = _residual_block(h, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_5')
+    #
+    #     # Apply average pooling
+    #     h = tf.reduce_mean(h, [1, 2])
+    #
+    #     # Store the feature mappings
+    #     self.features = h
+    #     self.image_feature_dim = h.get_shape().as_list()[-1]
+    #
+    #     if self.class_attr is not None:
+    #         # Return the image features
+    #         return h
+    #     else:
+    #         logits = _fc(h, self.total_classes, self.trainable_vars, name='fc_1', is_cifar=True)
+    #         return logits
+
+    def resnet32_conv_feedforward(self, h, kernels, filters, strides, leakiness=0.0):
         """
         Forward pass through a ResNet-18 network
 
@@ -850,30 +904,30 @@ class Model:
 
         # Conv1
         h = _conv(h, kernels[0], filters[0], strides[0], self.trainable_vars, name='conv_1')
-        h = _bn(h, self.trainable_vars, self.train_phase, name='bn_1')
-        h = tf.nn.relu(h)
 
         # Conv2_x
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_1')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_2')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_3')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_4')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv2_5')
+        h = _residual(h, filters[1], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_1', activate_before_residual=True)
+        h = _residual(h, filters[1], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_2')
+        h = _residual(h, filters[1], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_3')
+        h = _residual(h, filters[1], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_4')
+        h = _residual(h, filters[1], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv2_5')
 
         # Conv3_x
-        h = _residual_block_first(h, filters[2], strides[2], self.trainable_vars, self.train_phase, name='conv3_1', is_ATT_DATASET=self.is_ATT_DATASET)
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_2')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_3')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_4')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv3_5')
+        h = _residual(h, filters[2], strides[2], self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_1')
+        h = _residual(h, filters[2], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_2')
+        h = _residual(h, filters[2], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_3')
+        h = _residual(h, filters[2], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_4')
+        h = _residual(h, filters[2], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv3_5')
 
         # Conv4_x
-        h = _residual_block_first(h, filters[3], strides[3], self.trainable_vars, self.train_phase, name='conv4_1', is_ATT_DATASET=self.is_ATT_DATASET)
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_2')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_3')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_4')
-        h = _residual_block(h, self.trainable_vars, self.train_phase, name='conv4_5')
+        h = _residual(h, filters[3], strides[3], self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_1')
+        h = _residual(h, filters[3], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_2')
+        h = _residual(h, filters[3], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_3')
+        h = _residual(h, filters[3], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_4')
+        h = _residual(h, filters[3], 1, self.trainable_vars, self.train_phase, leakiness=leakiness, name='conv4_5')
 
+        h = _bn(h, self.trainable_vars, self.train_phase, name='bn_final')
+        h = tf.nn.leaky_relu(h, alpha=leakiness)
         # Apply average pooling
         h = tf.reduce_mean(h, [1, 2])
 
@@ -925,14 +979,16 @@ class Model:
             reg = tf.add_n([tf.reduce_sum(tf.square(w - w_star) * (f + scr)) for w, w_star, 
                 f, scr in zip(self.trainable_vars, self.star_vars, self.normalized_fisher_at_minima_vars, 
                     self.normalized_score_vars)])
-     
+
+        tf.summary.scalar("losses/reg_loss", reg)
         """
-        # ***** DON't USE THIS WITH MULTI-HEAD SETTING SINCE THIS WILL UPDATE ALL THE WEIGHTS *****
+        # ***** DON't USE THIS WITH MULTI-HEAD SETTING SINCE THIS WILL UPDATE ALL THE FC WEIGHTS *****
         # If CNN arch, then use the weight decay
         if self.is_ATT_DATASET:
             self.unweighted_entropy += tf.add_n([0.0005 * tf.nn.l2_loss(v) for v in self.trainable_vars if 'weights' in v.name or 'kernel' in v.name])
         """
         l2_reg = tf.add_n([tf.nn.l2_loss(v) for v in self.trainable_vars if 'weights' in v.name or 'kernel' in v.name])
+        tf.summary.scalar("losses/l2_loss", l2_reg)
         
         if imp_method == 'PNN':
             # Compute the gradients of regularized loss
