@@ -520,17 +520,18 @@ def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
                 if (iters % 100 == 0):
                     summary_writer.add_summary(summary, iters)
                     print('Step {:d} Full loss: {:1.5f}'.format(iters, loss))
-                if (iters % 1000 == 0):
-                    # ftask = test_task_sequence(model, x, sess, datasets[0]['test'], task_labels, task,
-                    #                            args.eval_single_head,
-                    #                            test_labels=test_labels)
-                    # print('Task: {}, Val Acc: {}'.format(task, ftask))
-                    save(saver, sess, args.log_dir, task, iters)
+                # if (iters % 1000 == 0):
+                #     ftask = test_task_sequence(model, x, sess, datasets[0]['test'], task_labels, task,
+                #                                args.eval_single_head,
+                #                                test_labels=test_labels)
+                #     print('Task: {}, Val Acc: {}'.format(task, ftask))
+                #     save(saver, sess, args.log_dir, task, iters)
 
                 if (math.isnan(loss)):
                     print('ERROR: NaNs NaNs NaNs!!!')
                     sys.exit(0)
 
+            save(saver, sess, args.log_dir, task, num_iters)
             print('\t\t\t\tTraining for Task%d done!'%(task))
 
             if model.imp_method == 'A-GEM':
@@ -912,7 +913,7 @@ def main():
         ave_acc[r] = []
         for i in range(num_tasks):
             ave_acc[r].append(np.mean(runs[r, i, :i+1]))
-    print(ave_acc)
+        print(ave_acc[r])
 
 
     # If cross-validation flag is enabled, store the stuff in a text file
