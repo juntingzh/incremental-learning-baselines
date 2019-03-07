@@ -231,7 +231,7 @@ class Model:
                     self.unweighted_entropy.append(tf.reduce_sum(adjusted_entropy)) # We will average it later on
             else:
                 if self.network_arch == 'RESNET-32':
-                    logits = self.resnet32_conv_feedforward(x, kernels, filters, strides, leakiness=0.1)
+                    logits = self.resnet32_conv_feedforward(x, kernels, filters, strides, leakiness=0)
                 else:
                     logits = self.resnet18_conv_feedforward(x, kernels, filters, strides)
 

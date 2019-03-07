@@ -499,9 +499,9 @@ def _get_cifar(data_dir, is_cifar_100):
         _X = _X.transpose([0, 2, 3, 1])
     
         # Compute the data mean and std for normalization
-        x_train_mean = np.mean(_X, axis=0)
-        # x_train_mean = np.mean(_X, axis=(0, 1, 2), keepdims=True)
-        # x_train_std = np.std(_X, axis=(0, 1, 2), keepdims=True)
+        # x_train_mean = np.mean(_X, axis=0)
+        x_train_mean = np.mean(_X, axis=(0, 1, 2), keepdims=True)
+        x_train_std = np.std(_X, axis=(0, 1, 2), keepdims=True)
 
         x_train = _X[:40000]
         y_train = _Y[:40000]
@@ -537,9 +537,9 @@ def _get_cifar(data_dir, is_cifar_100):
 
     # Normalize the train and validation sets
     x_train -= x_train_mean
-    # x_train /= x_train_std
+    x_train /= x_train_std
     x_validation -= x_train_mean
-    # x_validation /= x_train_std
+    x_validation /= x_train_std
 
     dataset['train'].append(x_train)
     dataset['train'].append(y_train)
@@ -577,7 +577,7 @@ def _get_cifar(data_dir, is_cifar_100):
 
     # Normalize the test set
     x_test -= x_train_mean
-    # x_test /= x_train_std
+    x_test /= x_train_std
 
     dataset['test'].append(x_test)
     dataset['test'].append(y_test)

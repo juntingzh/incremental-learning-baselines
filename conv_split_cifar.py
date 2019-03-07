@@ -72,7 +72,7 @@ RESNET18_CIFAR10_CHECKPOINT = './resnet-18-pretrained-cifar10/model.ckpt-19999'
 ## Evaluation options
 
 ## Task split
-NUM_TASKS = 1
+NUM_TASKS = 10
 MULTI_TASK = False
 
 
