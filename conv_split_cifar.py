@@ -160,7 +160,7 @@ def get_arguments():
                        help="Directory where the plots and model accuracies will be stored.")
     return parser.parse_args()
 
-def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
+def train_task_sequence(model, x, sess, datasets, saver, args):
     """
     Train and evaluate LLL system such that we only see a example once
     Args:
@@ -177,6 +177,15 @@ def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
 
         # Initialize the random seeds
         np.random.seed(args.random_seed+runid)
+
+        log_dir = os.path.join(args.log_dir, 'run_'+str(runid))
+        if not os.path.exists(log_dir):
+            print('Log directory %s created!' % (log_dir))
+            os.makedirs(log_dir)
+
+        #initilizer summary writer
+        summary_writer = tf.summary.FileWriter(log_dir,
+                                               graph=tf.get_default_graph())
 
         # Get the task labels from the total number of tasks and full label space
         task_labels = []
@@ -520,21 +529,21 @@ def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
                         model.train, model.update_small_omega, model.reg_loss, model.merged_summary], feed_dict=feed_dict)
 
                 if (iters % 100 == 0):
-                    summary_writer.add_summary(summary, iters)
+                    summary_writer.add_summary(summary, task * num_iters + iters)
                     print('Step {:d} Full loss: {:1.5f}'.format(iters, loss))
                 # if (iters % 1000 == 0):
                 #     ftask = test_task_sequence(model, x, sess, datasets[0]['test'], task_labels, task,
                 #                                args.eval_single_head,
                 #                                test_labels=test_labels)
                 #     print('Task: {}, Val Acc: {}'.format(task, ftask))
-                #     save(saver, sess, args.log_dir, task, iters)
+                #     save(saver, sess, log_dir, task, iters)
 
                 if (math.isnan(loss)):
                     print('Step {} Full loss: {} CE Loss {}'.format(iters, loss, ce_loss))
                     print('ERROR: NaNs NaNs NaNs!!!')
                     sys.exit(0)
 
-            save(saver, sess, args.log_dir, task, num_iters)
+            save(saver, sess, log_dir, task, num_iters)
             print('\t\t\t\tTraining for Task%d done!'%(task))
 
             if model.imp_method == 'A-GEM':
@@ -895,13 +904,11 @@ def main():
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
 
-        summary_writer = tf.summary.FileWriter(args.log_dir,
-                                               graph=tf.get_default_graph())
         saver = tf.train.Saver(var_list=tf.global_variables(), max_to_keep=1000)
 
         time_start = time.time()
         with tf.Session(config=config, graph=graph) as sess:
-            runs, task_labels_dataset = train_task_sequence(model, x, sess, datasets, saver, summary_writer, args)
+            runs, task_labels_dataset = train_task_sequence(model, x, sess, datasets, saver, args)
             # Close the session
             sess.close()
         time_end = time.time()
