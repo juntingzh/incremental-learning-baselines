@@ -126,6 +126,8 @@ def get_arguments():
                                 \n \nSupported values: %s"%(VALID_ARCHS))
     parser.add_argument("--num-runs", type=int, default=NUM_RUNS,
                        help="Total runs/ experiments over which accuracy is averaged.")
+    parser.add_argument("--num-tasks", type=int, default=NUM_TASKS,
+                        help="Total runs/ experiments over which accuracy is averaged.")
     parser.add_argument("--epochs", type=int, default=TRAIN_EPOCHS,
                        help="Number of training epochs for each task.")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
@@ -178,7 +180,7 @@ def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
 
         # Get the task labels from the total number of tasks and full label space
         task_labels = []
-        classes_per_task = TOTAL_CLASSES// NUM_TASKS
+        classes_per_task = TOTAL_CLASSES// args.num_tasks
         total_classes = classes_per_task * model.num_tasks
         if args.online_cross_val:
             label_array = np.arange(total_classes)
@@ -424,12 +426,12 @@ def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
 
                 elif model.imp_method == 'PI':
                     feed_dict[model.output_mask] = logit_mask
-                    _, _, _, loss, summary = sess.run([model.weights_old_ops_grouped, model.train, model.update_small_omega,
-                                              model.reg_loss, model.merged_summary], feed_dict=feed_dict)
+                    _, _, _, loss, summary, ce_loss = sess.run([model.weights_old_ops_grouped, model.train, model.update_small_omega,
+                                              model.reg_loss, model.merged_summary, model.unweighted_entropy], feed_dict=feed_dict)
 
                 elif model.imp_method == 'MAS':
                     feed_dict[model.output_mask] = logit_mask
-                    _, loss, summary = sess.run([model.train, model.reg_loss, model.merged_summary], feed_dict=feed_dict)
+                    _, loss, summary, ce_loss = sess.run([model.train, model.reg_loss, model.merged_summary, model.unweighted_entropy], feed_dict=feed_dict)
 
                 elif model.imp_method == 'S-GEM':
                     if task == 0:
@@ -528,6 +530,7 @@ def train_task_sequence(model, x, sess, datasets, saver, summary_writer, args):
                 #     save(saver, sess, args.log_dir, task, iters)
 
                 if (math.isnan(loss)):
+                    print('Step {} Full loss: {} CE Loss {}'.format(iters, loss, ce_loss))
                     print('ERROR: NaNs NaNs NaNs!!!')
                     sys.exit(0)
 
@@ -822,7 +825,7 @@ def main():
     if args.online_cross_val:
         num_tasks = K_FOR_CROSS_VAL
     else:
-        num_tasks = NUM_TASKS - K_FOR_CROSS_VAL
+        num_tasks = args.num_tasks - K_FOR_CROSS_VAL
 
     # Load the split cifar dataset
     data_labs = [np.arange(TOTAL_CLASSES)]
@@ -857,7 +860,7 @@ def main():
             #x = tf.map_fn(lambda img: tf.image.per_image_standardization(img), x)
 
         # Define the optimizer
-        train_iters = args.epochs * TOTAL_CLASSES / NUM_TASKS * 500 // args.batch_size
+        train_iters = args.epochs * TOTAL_CLASSES / args.num_tasks * 500 // args.batch_size
         if args.optim == 'ADAM':
             opt = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
 
