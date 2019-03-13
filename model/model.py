@@ -999,8 +999,9 @@ class Model:
         elif imp_method != 'A-GEM': # For A-GEM we will define the losses and gradients later on
             # Regularized training loss
             self.reg_loss = tf.squeeze(self.unweighted_entropy + self.synap_stgth * reg + self.weight_decay * l2_reg)
+            self.l2_reg_loss = tf.squeeze(self.unweighted_entropy + self.weight_decay * l2_reg)
             # Compute the gradients of the vanilla loss
-            self.vanilla_gradients_vars = self.opt.compute_gradients(self.unweighted_entropy, 
+            self.vanilla_gradients_vars = self.opt.compute_gradients(self.l2_reg_loss,
                     var_list=self.trainable_vars)
             # Compute the gradients of regularized loss
             self.reg_gradients_vars = self.opt.compute_gradients(self.reg_loss, 
