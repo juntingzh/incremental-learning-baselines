@@ -9,21 +9,22 @@ Training script for split CIFAR 100 experiment.
 from __future__ import print_function
 
 import argparse
+import datetime
+import math
 import os
 import sys
-import math
 import time
+from copy import deepcopy
 
-import datetime
 import numpy as np
 import tensorflow as tf
-from copy import deepcopy
-from six.moves import cPickle as pickle
 
-from utils.data_utils import construct_split_cifar, pad_and_random_crop_image
-from utils.utils import get_sample_weights, sample_from_dataset, update_episodic_memory, concatenate_datasets, samples_for_each_class, sample_from_dataset_icarl, compute_fgt, load_task_specific_data
-from utils.vis_utils import plot_acc_multiple_runs, plot_histogram, snapshot_experiment_meta_data, snapshot_experiment_eval, snapshot_task_labels
 from model import Model
+from utils.data_utils import construct_split_cifar, pad_and_random_crop_image
+from utils.utils import get_sample_weights, sample_from_dataset, update_episodic_memory, concatenate_datasets, \
+    sample_from_dataset_icarl, compute_fgt, load_task_specific_data
+from utils.vis_utils import plot_histogram, snapshot_experiment_meta_data, snapshot_experiment_eval, \
+    snapshot_task_labels
 
 ###############################################################
 ################ Some definitions #############################
@@ -882,6 +883,7 @@ def main():
             # boundaries = [40000, 60000]
             values = [args.learning_rate, 0.1 * args.learning_rate, 0.01 * args.learning_rate]
             learning_rate = tf.train.piecewise_constant(tf.train.get_or_create_global_step(), boundaries, values)
+            tf.summary.scalar('lr', learning_rate)
             opt = tf.train.MomentumOptimizer(learning_rate, OPT_MOMENTUM)
 
         # Create the Model/ construct the graph

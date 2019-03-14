@@ -7,11 +7,10 @@
 Model defintion
 """                                        
 
-import tensorflow as tf        
 import numpy as np
-import matplotlib.pyplot as plt
-from IPython import display
-from utils import clone_variable_list, create_fc_layer, create_conv_layer
+import tensorflow as tf
+
+from utils import create_fc_layer, create_conv_layer
 from utils.resnet_utils import _conv, _fc, _bn, _residual_block, _residual_block_first, _residual
 from utils.vgg_utils import vgg_conv_layer, vgg_fc_layer
 
@@ -969,16 +968,24 @@ class Model:
         elif imp_method == 'EWC' or imp_method == 'M-EWC':
             reg = tf.add_n([tf.reduce_sum(tf.square(w - w_star) * f) for w, w_star, 
                 f in zip(self.trainable_vars, self.star_vars, self.normalized_fisher_at_minima_vars)])
+            for v,f in zip(self.trainable_vars, self.normalized_fisher_at_minima_vars):
+                tf.summary.histogram(v.name.replace(":", "_"), f)
         elif imp_method == 'PI':
             reg = tf.add_n([tf.reduce_sum(tf.square(w - w_star) * f) for w, w_star, 
                 f in zip(self.trainable_vars, self.star_vars, self.big_omega_vars)])
+            for v,f in zip(self.trainable_vars, self.big_omega_vars):
+                tf.summary.histogram(v.name.replace(":", "_"), f)
         elif imp_method == 'MAS':
             reg = tf.add_n([tf.reduce_sum(tf.square(w - w_star) * f) for w, w_star, 
                 f in zip(self.trainable_vars, self.star_vars, self.hebbian_score_vars)])
+            for v,f in zip(self.trainable_vars, self.hebbian_score_vars):
+                tf.summary.histogram(v.name.replace(":", "_"), f)
         elif imp_method == 'RWALK':
             reg = tf.add_n([tf.reduce_sum(tf.square(w - w_star) * (f + scr)) for w, w_star, 
                 f, scr in zip(self.trainable_vars, self.star_vars, self.normalized_fisher_at_minima_vars, 
                     self.normalized_score_vars)])
+            for v,f,scr in zip(self.trainable_vars, self.normalized_fisher_at_minima_vars, self.normalized_score_vars):
+                tf.summary.histogram(v.name.replace(":", "_"), f+scr)
 
         tf.summary.scalar("losses/reg_loss", reg)
         """
@@ -1027,6 +1034,11 @@ class Model:
         else:
             # Get the value of old weights first
             with tf.control_dependencies([self.weights_old_ops_grouped]):
+                if self.imp_method == 'PI':
+                    # clip gradient to avoid NANs
+                    gradients, variables = zip(*self.reg_gradients_vars)
+                    gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+                    self.reg_gradients_vars = zip(gradients, variables)
                 # Define a training operation
                 self.train = self.opt.apply_gradients(self.reg_gradients_vars, global_step=tf.train.get_global_step())
 
