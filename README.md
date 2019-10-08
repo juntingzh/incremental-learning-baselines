@@ -1,6 +1,8 @@
 # Efficient Lifelong Learning with A-GEM
 
-This is forked from the [official implementation](https://github.com/facebookresearch/agem) of the [Averaged Gradient Episodic Memory (A-GEM)](https://arxiv.org/abs/1812.00420) in Tensorflow.
+This repo is forked from the [official implementation of RWalk and AGEM](https://github.com/facebookresearch/agem) and modified to enable single-headed evaluation for incremental learning.
+
+It is used to generate baseline results for EWC++, SI, MAS, and RWalk reported in our paper [Class-incremental Learning via Deep Model Consolidation](https://arxiv.org/abs/1903.07864).
 
 ## Requirements
 
@@ -26,9 +28,17 @@ $ ./download_cub_awa.sh
 ```
 The plotting code is provided under the folder `plotting_code/`. Update the paths in the plotting code accordingly.
  
-When using this code, please cite our papers:
+When using this code, please consider cite our paper:
 
 ```
+@article{zhang2019class,
+  title={Class-incremental learning via deep model consolidation},
+  author={Zhang, Junting and Zhang, Jie and Ghosh, Shalini and Li, Dawei and Tasci, Serafettin and Heck, Larry and Zhang, Heming and Kuo, C-C Jay},
+  journal={arXiv preprint arXiv:1903.07864},
+  year={2019}
+}
+
+and the papers by the original author:
 @inproceedings{AGEM,
   title={Efficient Lifelong Learning with A-GEM},
   author={Chaudhry, Arslan and Ranzato, Marc’Aurelio and Rohrbach, Marcus and Elhoseiny, Mohamed},
@@ -43,10 +53,5 @@ When using this code, please cite our papers:
   year={2018}
 }
 ```
-
-## Questions/ Bugs
-* For questions, contact the author Arslan Chaudhry (arslan.chaudhry@eng.ox.ac.uk).
-* Feel free to open the bugs if anything is broken.
-
 ## License
 This source code is released under The MIT License found in the LICENSE file in the root directory of this source tree. 
