@@ -1,6 +1,6 @@
 # Efficient Lifelong Learning with A-GEM
 
-This is the official implementation of the [Averaged Gradient Episodic Memory (A-GEM)](https://arxiv.org/abs/1812.00420) in Tensorflow.
+This is forked from the [official implementation](https://github.com/facebookresearch/agem) of the [Averaged Gradient Episodic Memory (A-GEM)](https://arxiv.org/abs/1812.00420) in Tensorflow.
 
 ## Requirements
 
