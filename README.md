@@ -2,7 +2,7 @@
 
 This repo is forked from the [official implementation of RWalk and AGEM](https://github.com/facebookresearch/agem) and modified to enable single-headed evaluation for incremental learning.
 
-It is used to generate baseline results for EWC++, SI, MAS, and RWalk reported in our paper [Class-incremental Learning via Deep Model Consolidation](https://arxiv.org/abs/1903.07864).
+It is used to generate baseline results for EWC++, SI, MAS, and RWalk reported in our WACV 2020 paper [Class-incremental Learning via Deep Model Consolidation](https://arxiv.org/abs/1903.07864).
 
 ## Requirements
 
@@ -31,11 +31,12 @@ The plotting code is provided under the folder `plotting_code/`. Update the path
 When using this code, please consider cite our paper:
 
 ```
-@article{zhang2019class,
-  title={Class-incremental learning via deep model consolidation},
-  author={Zhang, Junting and Zhang, Jie and Ghosh, Shalini and Li, Dawei and Tasci, Serafettin and Heck, Larry and Zhang, Heming and Kuo, C-C Jay},
-  journal={arXiv preprint arXiv:1903.07864},
-  year={2019}
+@inproceedings{zhang2020class,
+	title={Class-incremental learning via deep model consolidation},
+	author={Zhang, Junting and Zhang, Jie and Ghosh, Shalini and Li, Dawei and Tasci, Serafettin and Heck, Larry and Zhang, Heming and Kuo, C-C Jay},
+	booktitle={2020 IEEE Winter Conference on Applications of Computer Vision (WACV)},
+	year={2020},
+	organization={IEEE}
 }
 
 and the papers by the original author:
